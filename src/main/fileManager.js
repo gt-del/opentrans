@@ -25,15 +25,30 @@ export function saveState(translatorDir, state) {
 }
 
 function copyDirSync(src, dest) {
-  mkdirSync(dest, { recursive: true })
+  try {
+    mkdirSync(dest, { recursive: true })
+  } catch (error) {
+    throw new Error(`无法创建目录 ${dest}: ${error.message}\n提示：请检查目录权限`)
+  }
+
   const entries = readdirSync(src, { withFileTypes: true })
   for (const entry of entries) {
     const srcPath = join(src, entry.name)
     const destPath = join(dest, entry.name)
-    if (entry.isDirectory()) {
-      copyDirSync(srcPath, destPath)
-    } else if (!entry.name.endsWith('.md')) {
-      copyFileSync(srcPath, destPath)
+    try {
+      if (entry.isDirectory()) {
+        copyDirSync(srcPath, destPath)
+      } else if (!entry.name.endsWith('.md')) {
+        copyFileSync(srcPath, destPath)
+      }
+    } catch (error) {
+      if (error.code === 'EACCES') {
+        throw new Error(`权限不足：无法复制文件 ${srcPath}\n提示：请确保源文件和目标目录都有读写权限`)
+      } else if (error.code === 'ENOENT') {
+        throw new Error(`文件不存在：${srcPath}\n提示：源文件可能已被移动或删除`)
+      } else {
+        throw new Error(`复制文件失败 ${srcPath} -> ${destPath}: ${error.message}`)
+      }
     }
   }
 }
@@ -55,6 +70,15 @@ export async function cloneProject(srcDir) {
   const parentDir = dirname(srcDir)
   const baseName = basename(srcDir)
   const translatorDir = join(parentDir, `${baseName}-translator`)
+
+  // Check write permission for parent directory
+  try {
+    const testFile = join(parentDir, '.opentrans-permission-test')
+    writeFileSync(testFile, 'test')
+    require('fs').unlinkSync(testFile)
+  } catch (error) {
+    throw new Error(`目标目录没有写入权限：${parentDir}\n提示：请选择一个有写入权限的目录，或修改当前目录的权限`)
+  }
 
   const alreadyExists = existsSync(join(translatorDir, '.trans-state.json'))
 

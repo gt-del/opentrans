@@ -16,10 +16,13 @@
   },
   "dmg": {
     "title": "OpenTrans-Installer",
+    "background": null,
+    "icon": null,
     "contents": [
       { "x": 130, "y": 220 },
       { "x": 410, "y": 220, "type": "link", "path": "/Applications" },
-      { "x": 270, "y": 350, "path": "build/fix-macos.command" }
+      { "x": 270, "y": 350, "type": "file", "path": "build/fix-macos.command", "name": "🔧 macOS 修复工具.command" },
+      { "x": 270, "y": 420, "type": "file", "path": "build/INSTALL_MACOS.md", "name": "📖 安装说明.md" }
     ]
   },
   "win": {

@@ -34,6 +34,48 @@
 | Windows | `OpenTrans-Setup-x.x.x.exe` |
 | Linux | `OpenTrans-x.x.x.AppImage` / `.deb` |
 
+### macOS 安装步骤
+
+1. 下载 `OpenTrans-x.x.x.dmg` 文件
+2. 双击打开 DMG 镜像
+3. 将 `OpenTrans.app` 拖入 `Applications` 文件夹
+4. **重要**：如果遇到"应用已损坏"提示，请按以下步骤修复：
+
+#### 方法一：使用修复脚本（推荐）
+
+在 DMG 窗口中找到 `fix-macos.command`，双击运行，按提示输入密码即可。
+
+#### 方法二：手动修复
+
+打开"终端"应用，输入以下命令：
+
+```bash
+sudo xattr -r -d com.apple.quarantine /Applications/OpenTrans.app
+```
+
+输入开机密码后回车，然后即可正常打开 OpenTrans。
+
+> **为什么会出现"已损坏"提示？**
+> 这是 macOS Gatekeeper 安全机制。由于 OpenTrans 暂未通过 Apple 签名和公证，系统会将其标记为"未知来源"。上述命令会解除这个限制，对应用本身没有任何影响。
+
+### Windows 安装
+
+双击 `OpenTrans-Setup-x.x.x.exe`，按向导完成安装即可。
+
+### Linux 安装
+
+**AppImage 方式：**
+```bash
+chmod +x OpenTrans-x.x.x.AppImage
+./OpenTrans-x.x.x.AppImage
+```
+
+**Debian/Ubuntu (.deb)：**
+```bash
+sudo dpkg -i OpenTrans-x.x.x.deb
+sudo apt-get install -f  # 修复依赖
+```
+
 ## 快速上手
 
 1. 打开 OpenTrans，点击右上角 **⚙ 设置**，填入 API Base URL、API Key 和模型名称
@@ -78,6 +120,69 @@ npm run dev
 | Markdown 渲染 | markdown-it |
 | 翻译并发 | Worker Threads |
 | 打包 | electron-builder |
+
+## 常见问题
+
+### macOS 相关
+
+**Q: 提示"OpenTrans 已损坏，无法打开"怎么办？**
+
+A: 这是正常的 macOS 安全提示。按照[安装步骤](#macos-安装步骤)中的修复方法解决即可。
+
+**Q: 运行修复脚本后还是无法打开？**
+
+A: 请确保：
+1. 应用已拖入 `/Applications` 文件夹
+2. 修复命令中的路径正确
+3. 输入了正确的管理员密码
+
+如仍有问题，可以尝试重新下载 DMG 文件。
+
+**Q: 修复脚本找不到应用怎么办？**
+
+A: 新版修复脚本会自动搜索常见位置。如果仍找不到，请手动运行：
+```bash
+sudo xattr -r -d com.apple.quarantine /path/to/OpenTrans.app
+```
+（将 `/path/to/OpenTrans.app` 替换为实际路径）
+
+### 权限相关
+
+**Q: 提示"初始化失败: EACCES: permission denied"怎么办？**
+
+A: 这通常是目录权限问题。解决方法：
+1. 选择一个你有完全读写权限的目录作为项目位置
+2. 避免选择系统保护目录（如 `/System`、`/Library` 等）
+3. 推荐使用 `~/Documents` 或 `~/Desktop` 下的目录
+
+**Q: macOS 提示"OpenTrans 想要访问文件夹"？**
+
+A: 这是正常的权限请求。请点击"允许"以便 OpenTrans 读取和翻译项目文件。
+
+### 使用相关
+
+**Q: 支持哪些 Markdown 文件？**
+
+A: 支持所有 `.md` 扩展名的 Markdown 文件，包括子目录中的文件。
+
+**Q: 翻译速度很慢怎么办？**
+
+A: 可以在设置中调整并发数。建议值：
+- 免费 API：1-2
+- 付费 API：3-5
+- 本地模型：根据硬件性能调整
+
+**Q: 如何切换不同的 AI 模型？**
+
+A: 在设置中填入对应的 API Base URL 和 API Key：
+- **OpenAI**: `https://api.openai.com/v1`
+- **DeepSeek**: `https://api.deepseek.com`
+- **Moonshot**: `https://api.moonshot.cn/v1`
+- **其他兼容接口**: 填入对应的 Base URL
+
+**Q: 可以导出翻译结果吗？**
+
+A: 翻译完成后，所有译文都保存在 `{项目名}-translator/` 目录中，与原文件保持相同的目录结构。
 
 ## 许可证
 
