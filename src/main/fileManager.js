@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync, lstatSync, readlinkSync, realpathSync } from 'fs'
 import { join, relative, dirname, basename } from 'path'
 import { createHash } from 'crypto'
 
@@ -24,7 +24,9 @@ export function saveState(translatorDir, state) {
   writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8')
 }
 
-function copyDirSync(src, dest) {
+function copyDirSync(src, dest, options = {}) {
+  const { skipSpecialFiles = false, followSymlinks = false } = options
+
   try {
     mkdirSync(dest, { recursive: true })
   } catch (error) {
@@ -32,12 +34,46 @@ function copyDirSync(src, dest) {
   }
 
   const entries = readdirSync(src, { withFileTypes: true })
+  const skippedFiles = []
+
   for (const entry of entries) {
     const srcPath = join(src, entry.name)
     const destPath = join(dest, entry.name)
+
     try {
+      // 检查是否是特殊文件（符号链接、socket、FIFO等）
+      const stats = lstatSync(srcPath)
+
+      if (stats.isSymbolicLink()) {
+        if (skipSpecialFiles) {
+          skippedFiles.push({ path: srcPath, type: 'symlink', target: readlinkSync(srcPath) })
+          continue
+        } else if (followSymlinks) {
+          // 深度复制：复制符号链接指向的实际内容
+          const realPath = realpathSync(srcPath)
+          const realStats = lstatSync(realPath)
+          if (realStats.isDirectory()) {
+            copyDirSync(realPath, destPath, options)
+          } else if (!entry.name.endsWith('.md')) {
+            copyFileSync(realPath, destPath)
+          }
+          continue
+        } else {
+          // 默认跳过符号链接
+          skippedFiles.push({ path: srcPath, type: 'symlink' })
+          continue
+        }
+      }
+
+      if (stats.isSocket() || stats.isFIFO()) {
+        // Socket 和 FIFO 文件总是跳过
+        skippedFiles.push({ path: srcPath, type: stats.isSocket() ? 'socket' : 'fifo' })
+        continue
+      }
+
       if (entry.isDirectory()) {
-        copyDirSync(srcPath, destPath)
+        const result = copyDirSync(srcPath, destPath, options)
+        skippedFiles.push(...result.skippedFiles)
       } else if (!entry.name.endsWith('.md')) {
         copyFileSync(srcPath, destPath)
       }
@@ -46,11 +82,17 @@ function copyDirSync(src, dest) {
         throw new Error(`权限不足：无法复制文件 ${srcPath}\n提示：请确保源文件和目标目录都有读写权限`)
       } else if (error.code === 'ENOENT') {
         throw new Error(`文件不存在：${srcPath}\n提示：源文件可能已被移动或删除`)
+      } else if (error.code === 'ENOTSUP') {
+        // 不支持的操作，跳过
+        skippedFiles.push({ path: srcPath, type: 'unsupported', error: error.message })
+        continue
       } else {
         throw new Error(`复制文件失败 ${srcPath} -> ${destPath}: ${error.message}`)
       }
     }
   }
+
+  return { skippedFiles }
 }
 
 function collectMdFiles(dir, base = dir, result = []) {
@@ -66,7 +108,7 @@ function collectMdFiles(dir, base = dir, result = []) {
   return result
 }
 
-export async function cloneProject(srcDir) {
+export async function cloneProject(srcDir, copyOptions) {
   const parentDir = dirname(srcDir)
   const baseName = basename(srcDir)
   const translatorDir = join(parentDir, `${baseName}-translator`)
@@ -96,11 +138,11 @@ export async function cloneProject(srcDir) {
       }
     }
     if (changed) saveState(translatorDir, state)
-    return { translatorDir, mdFiles, resumed: true }
+    return { translatorDir, mdFiles, resumed: true, skippedFiles: [] }
   }
 
   // First time: copy all non-md files and initialize state
-  copyDirSync(srcDir, translatorDir)
+  const { skippedFiles } = copyDirSync(srcDir, translatorDir, copyOptions || {})
 
   const mdFiles = collectMdFiles(srcDir)
   const state = {}
@@ -111,7 +153,7 @@ export async function cloneProject(srcDir) {
   }
 
   saveState(translatorDir, state)
-  return { translatorDir, mdFiles, resumed: false }
+  return { translatorDir, mdFiles, resumed: false, skippedFiles }
 }
 
 export function diffScan(srcDir, translatorDir) {

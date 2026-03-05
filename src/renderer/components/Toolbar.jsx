@@ -15,13 +15,51 @@ export default function Toolbar() {
     setSrcDir(dir)
     setLoading(true)
     setStatus('正在初始化...')
-    const result = await window.electronAPI.cloneProject(dir)
-    if (!result.success) { setStatus('初始化失败: ' + result.error); setLoading(false); return }
+
+    // 首次尝试复制（默认跳过特殊文件）
+    let result = await window.electronAPI.cloneProject(dir, { skipSpecialFiles: true })
+
+    if (!result.success) {
+      setStatus('初始化失败: ' + result.error)
+      setLoading(false)
+      return
+    }
+
+    // 如果有跳过的特殊文件，询问用户如何处理
+    if (result.hasSkippedFiles && result.skippedFiles.length > 0 && !result.resumed) {
+      const choice = await window.electronAPI.showSpecialFilesDialog(result.skippedFiles)
+
+      if (choice.cancelled) {
+        setStatus('已取消')
+        setLoading(false)
+        return
+      }
+
+      if (choice.followSymlinks) {
+        // 用户选择深度复制，重新克隆项目
+        setStatus('正在深度复制...')
+        result = await window.electronAPI.cloneProject(dir, { followSymlinks: true })
+        if (!result.success) {
+          setStatus('初始化失败: ' + result.error)
+          setLoading(false)
+          return
+        }
+      }
+    }
+
     setTranslatorDir(result.translatorDir)
     setResumed(!!result.resumed)
     const treeResult = await window.electronAPI.getFileTree(dir, result.translatorDir)
     if (treeResult.success) setFileTree(treeResult.tree)
-    setStatus(result.resumed ? '已恢复上次进度' : '项目已初始化')
+
+    const skippedCount = result.skippedFiles ? result.skippedFiles.length : 0
+    const statusMsg = result.resumed
+      ? '已恢复上次进度'
+      : skippedCount > 0
+      ? `项目已初始化（跳过 ${skippedCount} 个特殊文件）`
+      : '项目已初始化'
+
+    setStatus(statusMsg)
     setLoading(false)
   }
 

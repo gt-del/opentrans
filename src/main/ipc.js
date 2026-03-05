@@ -87,13 +87,54 @@ export function registerIpcHandlers() {
     return result.filePaths[0]
   })
 
-  ipcMain.handle('clone-project', async (_e, srcDir) => {
+  ipcMain.handle('clone-project', async (_e, srcDir, copyOptions) => {
     try {
-      const result = await cloneProject(srcDir)
+      const result = await cloneProject(srcDir, copyOptions)
       diffScan(srcDir, result.translatorDir)
+
+      // 如果有跳过的特殊文件，返回给前端
+      if (result.skippedFiles && result.skippedFiles.length > 0) {
+        return {
+          success: true,
+          ...result,
+          hasSkippedFiles: true
+        }
+      }
+
       return { success: true, ...result }
     } catch (err) {
       return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('show-special-files-dialog', async (_e, skippedFiles) => {
+    const fileList = skippedFiles
+      .map(f => {
+        const type = f.type === 'symlink' ? '符号链接' :
+                     f.type === 'socket' ? 'Socket' :
+                     f.type === 'fifo' ? 'FIFO' : '不支持的文件'
+        return `  • ${f.path} (${type})`
+      })
+      .join('\n')
+
+    const result = await dialog.showMessageBox(getWin(), {
+      type: 'warning',
+      title: '检测到特殊文件',
+      message: `项目中包含 ${skippedFiles.length} 个特殊文件无法直接复制`,
+      detail: `以下文件已被跳过：\n\n${fileList}\n\n请选择如何处理：`,
+      buttons: ['跳过这些文件', '深度复制（复制实际内容）', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true
+    })
+
+    if (result.response === 2) {
+      return { cancelled: true }
+    }
+
+    return {
+      cancelled: false,
+      followSymlinks: result.response === 1  // 1 = 深度复制
     }
   })
 

@@ -4,8 +4,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectDirectory: () =>
     ipcRenderer.invoke('select-directory'),
 
-  cloneProject: (srcDir) =>
-    ipcRenderer.invoke('clone-project', srcDir),
+  cloneProject: (srcDir, copyOptions) =>
+    ipcRenderer.invoke('clone-project', srcDir, copyOptions),
+
+  showSpecialFilesDialog: (skippedFiles) =>
+    ipcRenderer.invoke('show-special-files-dialog', skippedFiles),
 
   // both srcDir and translatorDir needed by the main handler
   getFileTree: (srcDir, translatorDir) =>
