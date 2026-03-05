@@ -33,12 +33,43 @@ function copyDirSync(src, dest, options = {}) {
     throw new Error(`无法创建目录 ${dest}: ${error.message}\n提示：请检查目录权限`)
   }
 
+  // 跳过这些目录：对翻译文档来说不需要
+  const SKIP_DIRS = [
+    '.git',           // Git 仓库
+    'node_modules',   // Node.js 依赖
+    '.vscode',        // VS Code 配置
+    '.idea',          // JetBrains IDE
+    'dist',           // 构建输出
+    'build',          // 构建输出
+    '.next',          // Next.js
+    '.nuxt',          // Nuxt.js
+    'coverage',       // 测试覆盖率
+    '.cache',         // 缓存
+    'tmp',            // 临时文件
+    'temp'            // 临时文件
+  ]
+
+  // 跳过这些文件
+  const SKIP_FILES = [
+    '.DS_Store',      // macOS
+    'Thumbs.db',      // Windows
+    '.gitkeep',
+    '.gitignore',
+    '.npmrc',
+    '.yarnrc'
+  ]
+
   const entries = readdirSync(src, { withFileTypes: true })
   const skippedFiles = []
 
   for (const entry of entries) {
     const srcPath = join(src, entry.name)
     const destPath = join(dest, entry.name)
+
+    // 跳过不需要的目录和文件
+    if (SKIP_DIRS.includes(entry.name) || SKIP_FILES.includes(entry.name)) {
+      continue
+    }
 
     try {
       // 检查是否是特殊文件（符号链接、socket、FIFO等）
@@ -50,12 +81,17 @@ function copyDirSync(src, dest, options = {}) {
           continue
         } else if (followSymlinks) {
           // 深度复制：复制符号链接指向的实际内容
-          const realPath = realpathSync(srcPath)
-          const realStats = lstatSync(realPath)
-          if (realStats.isDirectory()) {
-            copyDirSync(realPath, destPath, options)
-          } else if (!entry.name.endsWith('.md')) {
-            copyFileSync(realPath, destPath)
+          try {
+            const realPath = realpathSync(srcPath)
+            const realStats = lstatSync(realPath)
+            if (realStats.isDirectory()) {
+              copyDirSync(realPath, destPath, options)
+            } else if (!entry.name.endsWith('.md')) {
+              copyFileSync(realPath, destPath)
+            }
+          } catch (err) {
+            // 符号链接失效或无法访问，跳过
+            skippedFiles.push({ path: srcPath, type: 'symlink-broken' })
           }
           continue
         } else {
@@ -78,16 +114,20 @@ function copyDirSync(src, dest, options = {}) {
         copyFileSync(srcPath, destPath)
       }
     } catch (error) {
-      if (error.code === 'EACCES') {
-        throw new Error(`权限不足：无法复制文件 ${srcPath}\n提示：请确保源文件和目标目录都有读写权限`)
+      // 任何无法复制的文件都跳过，不中断整个流程
+      if (error.code === 'EACCES' || error.code === 'EPERM') {
+        skippedFiles.push({ path: srcPath, type: 'permission-denied' })
+        continue
       } else if (error.code === 'ENOENT') {
-        throw new Error(`文件不存在：${srcPath}\n提示：源文件可能已被移动或删除`)
+        skippedFiles.push({ path: srcPath, type: 'not-found' })
+        continue
       } else if (error.code === 'ENOTSUP') {
-        // 不支持的操作，跳过
-        skippedFiles.push({ path: srcPath, type: 'unsupported', error: error.message })
+        skippedFiles.push({ path: srcPath, type: 'unsupported' })
         continue
       } else {
-        throw new Error(`复制文件失败 ${srcPath} -> ${destPath}: ${error.message}`)
+        // 其他未知错误也跳过
+        skippedFiles.push({ path: srcPath, type: 'error', error: error.message })
+        continue
       }
     }
   }
