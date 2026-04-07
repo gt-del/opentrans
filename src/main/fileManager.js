@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync, lstatSync, readlinkSync, realpathSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync, lstatSync, readlinkSync, realpathSync, unlinkSync } from 'fs'
 import { join, relative, dirname, basename } from 'path'
 import { createHash } from 'crypto'
 
@@ -22,6 +22,34 @@ export function loadState(translatorDir) {
 export function saveState(translatorDir, state) {
   const statePath = join(translatorDir, STATE_FILE)
   writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8')
+}
+
+function resolveProjectDir(inputDir) {
+  let resolvedSrcDir
+  let isSymlinkRoot = false
+
+  try {
+    const stats = lstatSync(inputDir)
+    isSymlinkRoot = stats.isSymbolicLink()
+    resolvedSrcDir = realpathSync(inputDir)
+    if (!lstatSync(resolvedSrcDir).isDirectory()) {
+      throw new Error('not-directory')
+    }
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new Error(`项目路径不存在或软链接已失效：${inputDir}`)
+    }
+    if (error.message === 'not-directory' || error.code === 'ENOTDIR') {
+      throw new Error(`所选路径不是目录：${inputDir}`)
+    }
+    throw new Error(`无法访问项目目录：${inputDir}\n${error.message}`)
+  }
+
+  return {
+    selectedDir: inputDir,
+    srcDir: resolvedSrcDir,
+    isSymlinkRoot
+  }
 }
 
 function copyDirSync(src, dest, options = {}) {
@@ -135,29 +163,92 @@ function copyDirSync(src, dest, options = {}) {
   return { skippedFiles }
 }
 
-function collectMdFiles(dir, base = dir, result = []) {
+function walkMarkdownEntries(dir, relBase = '', result = [], ancestors = new Set()) {
+  const realDir = realpathSync(dir)
+  if (ancestors.has(realDir)) return result
+
+  const nextAncestors = new Set(ancestors)
+  nextAncestors.add(realDir)
   const entries = readdirSync(dir, { withFileTypes: true })
+
   for (const entry of entries) {
+    const displayRelPath = relBase ? `${relBase}/${entry.name}` : entry.name
     const fullPath = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      collectMdFiles(fullPath, base, result)
-    } else if (entry.name.endsWith('.md')) {
-      result.push(relative(base, fullPath))
+
+    try {
+      const stats = lstatSync(fullPath)
+      if (stats.isSymbolicLink()) {
+        let realPath
+        try {
+          realPath = realpathSync(fullPath)
+        } catch {
+          continue
+        }
+
+        const realStats = lstatSync(realPath)
+        if (realStats.isDirectory()) {
+          walkMarkdownEntries(realPath, displayRelPath, result, nextAncestors)
+        } else if (entry.name.endsWith('.md') || basename(realPath).endsWith('.md')) {
+          result.push(displayRelPath)
+        }
+      } else if (stats.isDirectory()) {
+        walkMarkdownEntries(fullPath, displayRelPath, result, nextAncestors)
+      } else if (entry.name.endsWith('.md')) {
+        result.push(displayRelPath)
+      }
+    } catch {
+      continue
     }
   }
+
   return result
 }
 
+function buildTreeFromMdFiles(mdFiles, state) {
+  const root = []
+
+  function ensureDir(children, name, relPath) {
+    let dirNode = children.find(node => node.type === 'dir' && node.relPath === relPath)
+    if (!dirNode) {
+      dirNode = { name, type: 'dir', relPath, children: [] }
+      children.push(dirNode)
+    }
+    return dirNode
+  }
+
+  for (const relPath of [...mdFiles].sort()) {
+    const parts = relPath.split('/')
+    let children = root
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const currentRelPath = parts.slice(0, i + 1).join('/')
+      const isFile = i === parts.length - 1
+
+      if (isFile) {
+        const fileState = state[relPath] || { status: 'pending' }
+        children.push({ name: part, type: 'file', relPath, status: fileState.status })
+      } else {
+        const dirNode = ensureDir(children, part, currentRelPath)
+        children = dirNode.children
+      }
+    }
+  }
+
+  return root
+}
+
 export async function cloneProject(srcDir, copyOptions) {
-  const parentDir = dirname(srcDir)
-  const baseName = basename(srcDir)
+  const project = resolveProjectDir(srcDir)
+  const parentDir = dirname(project.srcDir)
+  const baseName = basename(project.srcDir)
   const translatorDir = join(parentDir, `${baseName}-translator`)
 
   // Check write permission for parent directory
   try {
     const testFile = join(parentDir, '.opentrans-permission-test')
     writeFileSync(testFile, 'test')
-    require('fs').unlinkSync(testFile)
+    unlinkSync(testFile)
   } catch (error) {
     throw new Error(`目标目录没有写入权限：${parentDir}\n提示：请选择一个有写入权限的目录，或修改当前目录的权限`)
   }
@@ -166,11 +257,11 @@ export async function cloneProject(srcDir, copyOptions) {
 
   if (alreadyExists) {
     // Project was previously cloned — skip copying, just sync new/changed md files
-    const mdFiles = collectMdFiles(srcDir)
+    const mdFiles = walkMarkdownEntries(project.srcDir)
     const state = loadState(translatorDir)
     let changed = false
     for (const relPath of mdFiles) {
-      const srcFilePath = join(srcDir, relPath)
+      const srcFilePath = join(project.srcDir, relPath)
       const hash = computeHash(srcFilePath)
       if (!state[relPath]) {
         state[relPath] = { status: 'pending', srcHash: hash }
@@ -178,27 +269,27 @@ export async function cloneProject(srcDir, copyOptions) {
       }
     }
     if (changed) saveState(translatorDir, state)
-    return { translatorDir, mdFiles, resumed: true, skippedFiles: [] }
+    return { ...project, translatorDir, mdFiles, resumed: true, skippedFiles: [] }
   }
 
   // First time: copy all non-md files and initialize state
-  const { skippedFiles } = copyDirSync(srcDir, translatorDir, copyOptions || {})
+  const { skippedFiles } = copyDirSync(project.srcDir, translatorDir, copyOptions || {})
 
-  const mdFiles = collectMdFiles(srcDir)
+  const mdFiles = walkMarkdownEntries(project.srcDir)
   const state = {}
   for (const relPath of mdFiles) {
-    const srcFilePath = join(srcDir, relPath)
+    const srcFilePath = join(project.srcDir, relPath)
     const hash = computeHash(srcFilePath)
     state[relPath] = { status: 'pending', srcHash: hash }
   }
 
   saveState(translatorDir, state)
-  return { translatorDir, mdFiles, resumed: false, skippedFiles }
+  return { ...project, translatorDir, mdFiles, resumed: false, skippedFiles }
 }
 
 export function diffScan(srcDir, translatorDir) {
   const state = loadState(translatorDir)
-  const mdFiles = collectMdFiles(srcDir)
+  const mdFiles = walkMarkdownEntries(srcDir)
   let changed = false
 
   for (const relPath of mdFiles) {
@@ -221,26 +312,8 @@ export function diffScan(srcDir, translatorDir) {
 
 export function getFileTree(srcDir, translatorDir) {
   const state = loadState(translatorDir)
-
-  function buildTree(dir, relBase) {
-    const entries = readdirSync(dir, { withFileTypes: true })
-    const children = []
-    for (const entry of entries) {
-      const relPath = relBase ? `${relBase}/${entry.name}` : entry.name
-      if (entry.isDirectory()) {
-        const subtree = buildTree(join(dir, entry.name), relPath)
-        if (subtree.length > 0) {
-          children.push({ name: entry.name, type: 'dir', relPath, children: subtree })
-        }
-      } else if (entry.name.endsWith('.md')) {
-        const fileState = state[relPath] || { status: 'pending' }
-        children.push({ name: entry.name, type: 'file', relPath, status: fileState.status })
-      }
-    }
-    return children
-  }
-
-  return buildTree(srcDir, '')
+  const mdFiles = walkMarkdownEntries(srcDir)
+  return buildTreeFromMdFiles(mdFiles, state)
 }
 
 export function updateFileStatus(translatorDir, relPath, status, srcHash) {

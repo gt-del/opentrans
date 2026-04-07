@@ -90,7 +90,7 @@ export function registerIpcHandlers() {
   ipcMain.handle('clone-project', async (_e, srcDir, copyOptions) => {
     try {
       const result = await cloneProject(srcDir, copyOptions)
-      diffScan(srcDir, result.translatorDir)
+      diffScan(result.srcDir, result.translatorDir)
 
       // 如果有跳过的特殊文件，返回给前端
       if (result.skippedFiles && result.skippedFiles.length > 0) {

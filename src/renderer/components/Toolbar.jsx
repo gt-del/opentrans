@@ -12,7 +12,6 @@ export default function Toolbar() {
   async function handleSelectProject() {
     const dir = await window.electronAPI.selectDirectory()
     if (!dir) return
-    setSrcDir(dir)
     setLoading(true)
     setStatus('正在初始化...')
 
@@ -47,9 +46,10 @@ export default function Toolbar() {
       }
     }
 
+    setSrcDir(result.srcDir)
     setTranslatorDir(result.translatorDir)
     setResumed(!!result.resumed)
-    const treeResult = await window.electronAPI.getFileTree(dir, result.translatorDir)
+    const treeResult = await window.electronAPI.getFileTree(result.srcDir, result.translatorDir)
     if (treeResult.success) setFileTree(treeResult.tree)
 
     const skippedCount = result.skippedFiles ? result.skippedFiles.length : 0
