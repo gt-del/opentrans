@@ -1,8 +1,32 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync, lstatSync, readlinkSync, realpathSync, unlinkSync } from 'fs'
-import { join, relative, dirname, basename } from 'path'
+import { join, basename } from 'path'
 import { createHash } from 'crypto'
 
 const STATE_FILE = '.trans-state.json'
+const INTERNAL_OUTPUT_DIR = '.opentrans'
+const SKIP_DIRS = [
+  '.git',
+  'node_modules',
+  '.vscode',
+  '.idea',
+  'dist',
+  'build',
+  '.next',
+  '.nuxt',
+  'coverage',
+  '.cache',
+  'tmp',
+  'temp',
+  INTERNAL_OUTPUT_DIR
+]
+const SKIP_FILES = [
+  '.DS_Store',
+  'Thumbs.db',
+  '.gitkeep',
+  '.gitignore',
+  '.npmrc',
+  '.yarnrc'
+]
 
 export function computeHash(filePath) {
   const content = readFileSync(filePath)
@@ -52,6 +76,14 @@ function resolveProjectDir(inputDir) {
   }
 }
 
+export function resolveTranslatorDir(srcDir, options = {}) {
+  const baseName = basename(srcDir)
+  const translatorName = `${baseName}-translator`
+  const useCustomRoot = options.outputMode === 'custom' && options.customOutputDir
+  const outputRoot = useCustomRoot ? options.customOutputDir : join(srcDir, INTERNAL_OUTPUT_DIR)
+  return join(outputRoot, translatorName)
+}
+
 function copyDirSync(src, dest, options = {}) {
   const { skipSpecialFiles = false, followSymlinks = false } = options
 
@@ -60,32 +92,6 @@ function copyDirSync(src, dest, options = {}) {
   } catch (error) {
     throw new Error(`无法创建目录 ${dest}: ${error.message}\n提示：请检查目录权限`)
   }
-
-  // 跳过这些目录：对翻译文档来说不需要
-  const SKIP_DIRS = [
-    '.git',           // Git 仓库
-    'node_modules',   // Node.js 依赖
-    '.vscode',        // VS Code 配置
-    '.idea',          // JetBrains IDE
-    'dist',           // 构建输出
-    'build',          // 构建输出
-    '.next',          // Next.js
-    '.nuxt',          // Nuxt.js
-    'coverage',       // 测试覆盖率
-    '.cache',         // 缓存
-    'tmp',            // 临时文件
-    'temp'            // 临时文件
-  ]
-
-  // 跳过这些文件
-  const SKIP_FILES = [
-    '.DS_Store',      // macOS
-    'Thumbs.db',      // Windows
-    '.gitkeep',
-    '.gitignore',
-    '.npmrc',
-    '.yarnrc'
-  ]
 
   const entries = readdirSync(src, { withFileTypes: true })
   const skippedFiles = []
@@ -172,6 +178,10 @@ function walkMarkdownEntries(dir, relBase = '', result = [], ancestors = new Set
   const entries = readdirSync(dir, { withFileTypes: true })
 
   for (const entry of entries) {
+    if (entry.isDirectory() && SKIP_DIRS.includes(entry.name)) {
+      continue
+    }
+
     const displayRelPath = relBase ? `${relBase}/${entry.name}` : entry.name
     const fullPath = join(dir, entry.name)
 
@@ -238,19 +248,21 @@ function buildTreeFromMdFiles(mdFiles, state) {
   return root
 }
 
-export async function cloneProject(srcDir, copyOptions) {
+export async function cloneProject(srcDir, options = {}) {
   const project = resolveProjectDir(srcDir)
-  const parentDir = dirname(project.srcDir)
-  const baseName = basename(project.srcDir)
-  const translatorDir = join(parentDir, `${baseName}-translator`)
+  const translatorDir = resolveTranslatorDir(project.srcDir, options)
+  const translatorRoot = options.outputMode === 'custom' && options.customOutputDir
+    ? options.customOutputDir
+    : join(project.srcDir, INTERNAL_OUTPUT_DIR)
 
-  // Check write permission for parent directory
+  // Check write permission for the resolved output root.
   try {
-    const testFile = join(parentDir, '.opentrans-permission-test')
+    mkdirSync(translatorRoot, { recursive: true })
+    const testFile = join(translatorRoot, '.opentrans-permission-test')
     writeFileSync(testFile, 'test')
     unlinkSync(testFile)
   } catch (error) {
-    throw new Error(`目标目录没有写入权限：${parentDir}\n提示：请选择一个有写入权限的目录，或修改当前目录的权限`)
+    throw new Error(`目标目录没有写入权限：${translatorRoot}\n提示：请选择一个有写入权限的目录，或修改当前目录的权限`)
   }
 
   const alreadyExists = existsSync(join(translatorDir, '.trans-state.json'))
@@ -273,7 +285,7 @@ export async function cloneProject(srcDir, copyOptions) {
   }
 
   // First time: copy all non-md files and initialize state
-  const { skippedFiles } = copyDirSync(project.srcDir, translatorDir, copyOptions || {})
+  const { skippedFiles } = copyDirSync(project.srcDir, translatorDir, options || {})
 
   const mdFiles = walkMarkdownEntries(project.srcDir)
   const state = {}

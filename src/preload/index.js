@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectDirectory: () =>
     ipcRenderer.invoke('select-directory'),
 
+  selectOutputDirectory: () =>
+    ipcRenderer.invoke('select-output-directory'),
+
   cloneProject: (srcDir, copyOptions) =>
     ipcRenderer.invoke('clone-project', srcDir, copyOptions),
 

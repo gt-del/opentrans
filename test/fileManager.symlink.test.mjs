@@ -2,9 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
-import { cloneProject, getFileTree } from '../src/main/fileManager.js'
+import { cloneProject, getFileTree, resolveTranslatorDir } from '../src/main/fileManager.js'
 
 async function withTempDir(run) {
   const root = mkdtempSync(join(tmpdir(), 'opentrans-test-'))
@@ -41,7 +41,7 @@ test('cloneProject resolves a symlinked root repository and scans markdown files
     assert.equal(result.srcDir, realpathSync(realRepo))
     assert.equal(result.selectedDir, symlinkRepo)
     assert.equal(result.isSymlinkRoot, true)
-    assert.equal(result.translatorDir, join(dirname(realpathSync(realRepo)), 'real-repo-translator'))
+    assert.equal(result.translatorDir, join(realpathSync(realRepo), '.opentrans', 'real-repo-translator'))
     assert.deepEqual(result.mdFiles.sort(), ['README.md', 'docs/guide.md'])
 
     const tree = getFileTree(result.srcDir, result.translatorDir)
@@ -75,5 +75,49 @@ test('cloneProject includes markdown files inside symlinked directories and file
       flattenFiles(tree),
       ['docs/local.md', 'linked-docs/linked.md', 'linked-file.md']
     )
+  })
+})
+
+test('resolveTranslatorDir uses project-local hidden directory by default', async () => {
+  await withTempDir(async (root) => {
+    const repo = join(root, 'repo')
+    mkdirSync(repo, { recursive: true })
+
+    const translatorDir = resolveTranslatorDir(repo, {})
+
+    assert.equal(translatorDir, join(repo, '.opentrans', 'repo-translator'))
+  })
+})
+
+test('resolveTranslatorDir supports custom output root', async () => {
+  await withTempDir(async (root) => {
+    const repo = join(root, 'repo')
+    const outputRoot = join(root, 'translations')
+    mkdirSync(repo, { recursive: true })
+    mkdirSync(outputRoot, { recursive: true })
+
+    const translatorDir = resolveTranslatorDir(repo, {
+      outputMode: 'custom',
+      customOutputDir: outputRoot
+    })
+
+    assert.equal(translatorDir, join(outputRoot, 'repo-translator'))
+  })
+})
+
+test('getFileTree skips markdown files inside the generated .opentrans directory', async () => {
+  await withTempDir(async (root) => {
+    const repo = join(root, 'repo')
+    const translatorDir = join(repo, '.opentrans', 'repo-translator')
+
+    mkdirSync(join(repo, 'docs'), { recursive: true })
+    mkdirSync(translatorDir, { recursive: true })
+    writeFileSync(join(repo, 'docs', 'guide.md'), '# guide\n')
+    writeFileSync(join(translatorDir, 'generated.md'), '# translated\n')
+
+    const result = await cloneProject(repo, { skipSpecialFiles: true })
+    const tree = getFileTree(result.srcDir, result.translatorDir)
+
+    assert.deepEqual(flattenFiles(tree), ['docs/guide.md'])
   })
 })

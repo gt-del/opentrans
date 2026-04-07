@@ -3,9 +3,15 @@ import MarkdownIt from 'markdown-it'
 import useStore from '../stores/useStore'
 
 const md = new MarkdownIt({ html: true, linkify: true, typographer: true })
+const FILE_ACTION_LABEL = {
+  pending: '翻译当前文件',
+  updated: '重新翻译当前文件',
+  error: '重试翻译当前文件',
+  translated: '重新翻译当前文件'
+}
 
 const EditorPanel = forwardRef(function EditorPanel({ onScroll }, ref) {
-  const { selectedFile, translatorDir, progressMap, updateProgress } = useStore()
+  const { selectedFile, srcDir, translatorDir, settings, progressMap, errorMap, updateProgress } = useStore()
   const [content, setContent] = useState('')
   const [html, setHtml] = useState('')
   const [editMode, setEditMode] = useState(false)
@@ -58,8 +64,16 @@ const EditorPanel = forwardRef(function EditorPanel({ onScroll }, ref) {
     }
   }
 
+  async function handleTranslateCurrentFile() {
+    if (!selectedFile || !srcDir || !translatorDir || isTranslating) return
+    updateProgress(selectedFile.relPath, 'translating')
+    await window.electronAPI.translateFile(selectedFile.srcPath, srcDir, translatorDir, settings)
+  }
+
   const status = selectedFile && progressMap[selectedFile.relPath]
   const isTranslating = status === 'translating'
+  const errorMessage = selectedFile ? errorMap[selectedFile.relPath] : ''
+  const actionLabel = selectedFile ? (FILE_ACTION_LABEL[status] || '翻译当前文件') : ''
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-deep)' }}>
@@ -81,6 +95,34 @@ const EditorPanel = forwardRef(function EditorPanel({ onScroll }, ref) {
           {saving && (
             <span style={{ fontSize: 11, color: '#3B82F6', display: 'flex', alignItems: 'center', gap: 5 }}>
               <i className="fa fa-spinner fa-spin" />保存中…
+            </span>
+          )}
+          {selectedFile && (
+            <button
+              onClick={handleTranslateCurrentFile}
+              disabled={isTranslating}
+              style={{
+                background: isTranslating ? 'var(--bg-mid)' : 'linear-gradient(135deg,#10B981,#059669)',
+                border: isTranslating ? '1px solid var(--border-solid)' : 'none',
+                borderRadius: 6,
+                padding: '5px 12px',
+                fontSize: 11,
+                color: isTranslating ? 'var(--text-muted)' : '#fff',
+                cursor: isTranslating ? 'not-allowed' : 'pointer',
+                fontWeight: 600
+              }}
+              title={actionLabel}
+            >
+              <i className={`fa ${isTranslating ? 'fa-spinner fa-spin' : 'fa-language'}`} style={{ marginRight: 4 }} />
+              {isTranslating ? '翻译中…' : actionLabel}
+            </button>
+          )}
+          {!isTranslating && !saving && errorMessage && (
+            <span
+              title={errorMessage}
+              style={{ maxWidth: 340, fontSize: 11, color: '#EF4444', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            >
+              <i className="fa fa-warning" />{errorMessage}
             </span>
           )}
           {!isTranslating && !saving && content && (

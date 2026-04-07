@@ -10,7 +10,7 @@ const STATUS_CONFIG = {
 }
 
 function FileNode({ node, depth = 0, selectedRelPath }) {
-  const { srcDir, translatorDir, setSelectedFile, settings, updateProgress } = useStore()
+  const { srcDir, translatorDir, setSelectedFile, settings, updateProgress, errorMap } = useStore()
   const [open, setOpen] = useState(true)
   const pl = depth * 16 + 12
 
@@ -42,17 +42,13 @@ function FileNode({ node, depth = 0, selectedRelPath }) {
   const cfg = STATUS_CONFIG[node.status] || STATUS_CONFIG.pending
   const isSelected = node.relPath === selectedRelPath
   const isTranslating = node.status === 'translating'
+  const errorMessage = errorMap[node.relPath]
 
   async function handleClick() {
     if (!srcDir || !translatorDir) return
     const srcPath = `${srcDir}/${node.relPath}`
     const destPath = `${translatorDir}/${node.relPath}`
     setSelectedFile({ relPath: node.relPath, srcPath, destPath })
-    // 只有未翻译的才自动触发翻译
-    if (node.status !== 'translated') {
-      updateProgress(node.relPath, 'translating')
-      await window.electronAPI.translateFile(srcPath, srcDir, translatorDir, settings)
-    }
   }
 
   async function handleRetranslate(e) {
@@ -67,6 +63,7 @@ function FileNode({ node, depth = 0, selectedRelPath }) {
 
   return (
     <div
+      title={errorMessage ? `翻译失败：${errorMessage}` : node.relPath}
       style={{
         display: 'flex', alignItems: 'center',
         paddingLeft: pl, paddingRight: 6, paddingTop: 3, paddingBottom: 3,
@@ -101,7 +98,7 @@ function FileNode({ node, depth = 0, selectedRelPath }) {
       <button
         className="retranslate-btn"
         onClick={handleRetranslate}
-        title="重新翻译"
+        title={node.status === 'translated' ? '重新翻译' : '开始翻译'}
         style={{
           width: 22, height: 22, flexShrink: 0, marginLeft: 2,
           background: 'none', border: 'none', borderRadius: 4,

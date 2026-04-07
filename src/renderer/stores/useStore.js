@@ -33,6 +33,7 @@ const useStore = create((set, get) => ({
   fileTree: [],
   selectedFile: null,
   progressMap: {},
+  errorMap: {},
 
   settings: {
     baseUrl: 'https://api.openai.com/v1',
@@ -40,6 +41,8 @@ const useStore = create((set, get) => ({
     model: 'gpt-4o-mini',
     concurrency: 3,
     chunkSize: 12000,
+    outputMode: 'project',
+    customOutputDir: '',
     ...loadSettings()
   },
 
@@ -54,9 +57,13 @@ const useStore = create((set, get) => ({
   setFileTree: (tree) => set({ fileTree: tree }),
   setSelectedFile: (file) => set({ selectedFile: file }),
 
-  updateProgress: (relPath, status) =>
+  updateProgress: (relPath, status, error = '') =>
     set((state) => ({
       progressMap: { ...state.progressMap, [relPath]: status },
+      errorMap: {
+        ...state.errorMap,
+        ...(error ? { [relPath]: error } : status === 'translated' || status === 'translating' ? { [relPath]: '' } : {})
+      },
       fileTree: updateTreeStatus(state.fileTree, relPath, status)
     })),
 

@@ -20,7 +20,7 @@ export default function App() {
   useEffect(() => {
     if (window.electronAPI) {
       cleanupRef.current = window.electronAPI.onTranslationProgress((data) => {
-        updateProgress(data.relPath, data.status)
+        updateProgress(data.relPath, data.status, data.error || '')
       })
     }
     return () => { if (cleanupRef.current) cleanupRef.current() }

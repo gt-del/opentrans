@@ -2,12 +2,21 @@ import React, { useState } from 'react'
 import useStore from '../stores/useStore'
 
 export default function Toolbar() {
-  const { srcDir, setSrcDir, translatorDir, setTranslatorDir, setFileTree, settings, openSettings, progressMap, theme, toggleTheme } = useStore()
+  const { srcDir, setSrcDir, translatorDir, setTranslatorDir, setFileTree, selectedFile, settings, openSettings, progressMap, errorMap, theme, toggleTheme, updateProgress } = useStore()
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
   const [resumed, setResumed] = useState(false)
 
   const translatingCount = Object.values(progressMap).filter(s => s === 'translating').length
+  const latestError = Object.values(errorMap).filter(Boolean).at(-1) || ''
+
+  function buildCloneOptions(extra = {}) {
+    return {
+      outputMode: settings.outputMode,
+      customOutputDir: settings.customOutputDir,
+      ...extra
+    }
+  }
 
   async function handleSelectProject() {
     const dir = await window.electronAPI.selectDirectory()
@@ -16,7 +25,7 @@ export default function Toolbar() {
     setStatus('正在初始化...')
 
     // 首次尝试复制（默认跳过特殊文件）
-    let result = await window.electronAPI.cloneProject(dir, { skipSpecialFiles: true })
+    let result = await window.electronAPI.cloneProject(dir, buildCloneOptions({ skipSpecialFiles: true }))
 
     if (!result.success) {
       setStatus('初始化失败: ' + result.error)
@@ -37,7 +46,7 @@ export default function Toolbar() {
       if (choice.followSymlinks) {
         // 用户选择深度复制，重新克隆项目
         setStatus('正在深度复制...')
-        result = await window.electronAPI.cloneProject(dir, { followSymlinks: true })
+        result = await window.electronAPI.cloneProject(dir, buildCloneOptions({ followSymlinks: true }))
         if (!result.success) {
           setStatus('初始化失败: ' + result.error)
           setLoading(false)
@@ -68,6 +77,13 @@ export default function Toolbar() {
     setStatus('加入翻译队列...')
     await window.electronAPI.startBatchTranslate(srcDir, translatorDir, settings)
     setStatus('全部任务已入队')
+  }
+
+  async function handleTranslateCurrent() {
+    if (!srcDir || !translatorDir || !selectedFile) return
+    updateProgress(selectedFile.relPath, 'translating')
+    setStatus(`开始翻译 ${selectedFile.relPath}`)
+    await window.electronAPI.translateFile(selectedFile.srcPath, srcDir, translatorDir, settings)
   }
 
   async function handleRefresh() {
@@ -138,11 +154,21 @@ export default function Toolbar() {
           </button>
 
           <button style={hdrBtn({ background: 'var(--bg-mid)', color: 'var(--text-secondary)', border: '1px solid var(--border-solid)' })}
+            onClick={handleTranslateCurrent}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-mid)' }}
+            disabled={!selectedFile}
+            title={selectedFile ? `翻译 ${selectedFile.relPath}` : '请先选择一个文件'}
+          >
+            <i className="fa fa-file-text-o" /><span>翻译当前文件</span>
+          </button>
+
+          <button style={hdrBtn({ background: 'var(--bg-mid)', color: 'var(--text-secondary)', border: '1px solid var(--border-solid)', opacity: selectedFile ? 1 : 0.6 })}
             onClick={handleBatchTranslate}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-mid)' }}
           >
-            <i className="fa fa-play-circle" /><span>全量翻译</span>
+            <i className="fa fa-play-circle" /><span>翻译全部</span>
           </button>
         </>}
       </div>
@@ -158,10 +184,13 @@ export default function Toolbar() {
           </div>
         )}
 
-        {status && !translatingCount && (
-          <span style={{ fontSize: 12, color: 'var(--text-subtle)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {(latestError || status) && !translatingCount && (
+          <span
+            title={latestError || status}
+            style={{ fontSize: 12, color: latestError ? '#EF4444' : 'var(--text-subtle)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
             {resumed && <span style={{ color: '#10B981', marginRight: 4 }}>●</span>}
-            {status}
+            {latestError || status}
           </span>
         )}
 

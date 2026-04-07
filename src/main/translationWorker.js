@@ -4,6 +4,28 @@ const path = require('path')
 
 const DEFAULT_CHUNK_SIZE = 12000 // characters per API call (overridden by apiConfig.chunkSize)
 
+function normalizeBaseUrl(baseUrl) {
+  const trimmed = typeof baseUrl === 'string' ? baseUrl.trim() : ''
+  if (!trimmed) {
+    throw new Error('未配置 API Base URL')
+  }
+
+  const normalized = trimmed.replace(/\/$/, '')
+  if (normalized.endsWith('/chat/completions')) {
+    return normalized
+  }
+
+  return `${normalized}/chat/completions`
+}
+
+function validateApiConfig(apiConfig = {}) {
+  if (!apiConfig.apiKey || !String(apiConfig.apiKey).trim()) {
+    throw new Error('未配置 API Key')
+  }
+
+  normalizeBaseUrl(apiConfig.baseUrl)
+}
+
 // ─────────────────────────────────────────────
 // Step 1: Convert common wiki markup to standard Markdown
 // ─────────────────────────────────────────────
@@ -85,8 +107,10 @@ function splitMarkdownIntoChunks(content, maxSize = DEFAULT_CHUNK_SIZE, level = 
 // Step 3: Translate a single chunk via API
 // ─────────────────────────────────────────────
 async function translateChunk(chunk, apiConfig) {
-  const { baseUrl, apiKey, model } = apiConfig
-  const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`
+  validateApiConfig(apiConfig)
+
+  const { apiKey, model } = apiConfig
+  const url = normalizeBaseUrl(apiConfig.baseUrl)
 
   const response = await fetch(url, {
     method: 'POST',
@@ -157,6 +181,7 @@ async function main() {
   const { filePath, srcContent, apiConfig, destPath } = workerData
 
   try {
+    validateApiConfig(apiConfig)
     const translated = await translateContent(srcContent, apiConfig)
 
     fs.mkdirSync(path.dirname(destPath), { recursive: true })

@@ -2,7 +2,19 @@ import React, { useState } from 'react'
 import useStore from '../stores/useStore'
 
 export default function SettingsModal() {
-  const { settings, setSettings, closeSettings, profiles, saveProfile, applyProfile, deleteProfile } = useStore()
+  const {
+    settings,
+    setSettings,
+    closeSettings,
+    profiles,
+    saveProfile,
+    applyProfile,
+    deleteProfile,
+    srcDir,
+    setSrcDir,
+    setTranslatorDir,
+    setFileTree
+  } = useStore()
   const [form, setForm] = useState({ ...settings })
   const [profileName, setProfileName] = useState('')
   const [tab, setTab] = useState('config') // 'config' | 'profiles'
@@ -16,8 +28,24 @@ export default function SettingsModal() {
     }))
   }
 
-  function handleSave() {
+  async function handleSave() {
     setSettings(form)
+
+    if (srcDir) {
+      const result = await window.electronAPI.cloneProject(srcDir, {
+        outputMode: form.outputMode,
+        customOutputDir: form.customOutputDir,
+        skipSpecialFiles: true
+      })
+
+      if (result.success) {
+        setSrcDir(result.srcDir)
+        setTranslatorDir(result.translatorDir)
+        const treeResult = await window.electronAPI.getFileTree(result.srcDir, result.translatorDir)
+        if (treeResult.success) setFileTree(treeResult.tree)
+      }
+    }
+
     closeSettings()
   }
 
@@ -38,6 +66,12 @@ export default function SettingsModal() {
       setForm(s)
     }
     setTab('config')
+  }
+
+  async function handleSelectOutputDir() {
+    const dir = await window.electronAPI.selectOutputDirectory()
+    if (!dir) return
+    setForm(prev => ({ ...prev, customOutputDir: dir, outputMode: 'custom' }))
   }
 
   const inputStyle = {
@@ -140,6 +174,49 @@ export default function SettingsModal() {
                 >
                   {[1, 2, 3, 5, 8, 10].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
+              </div>
+              <div>
+                <label style={labelStyle}>
+                  <i className="fa fa-folder-open-o" style={{ color: 'rgba(59,130,246,0.7)' }} />翻译输出目录
+                </label>
+                <select
+                  name="outputMode"
+                  value={form.outputMode ?? 'project'}
+                  onChange={handleChange}
+                  style={{ ...inputStyle, cursor: 'pointer', marginBottom: 8 }}
+                  onFocus={e => { e.target.style.borderColor = '#3B82F6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)' }}
+                  onBlur={e =>  { e.target.style.borderColor = 'var(--border-solid)'; e.target.style.boxShadow = 'none' }}
+                >
+                  <option value="project">项目内下一级目录（默认）</option>
+                  <option value="custom">自定义目录</option>
+                </select>
+                <div style={{ fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+                  {form.outputMode === 'custom'
+                    ? (form.customOutputDir
+                        ? `当前输出根目录：${form.customOutputDir}`
+                        : '尚未选择自定义目录')
+                    : '将保存到 <项目目录>/.opentrans/<项目名>-translator'}
+                </div>
+                {form.outputMode === 'custom' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <input
+                      name="customOutputDir"
+                      type="text"
+                      value={form.customOutputDir ?? ''}
+                      onChange={handleChange}
+                      placeholder="/path/to/translations"
+                      style={{ ...inputStyle, flex: 1 }}
+                      onFocus={e => { e.target.style.borderColor = '#3B82F6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)' }}
+                      onBlur={e =>  { e.target.style.borderColor = 'var(--border-solid)'; e.target.style.boxShadow = 'none' }}
+                    />
+                    <button
+                      onClick={handleSelectOutputDir}
+                      style={{ padding: '9px 14px', background: 'var(--bg-mid)', border: '1px solid var(--border-solid)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      选择目录
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Save as profile */}

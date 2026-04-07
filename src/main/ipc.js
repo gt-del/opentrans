@@ -87,6 +87,14 @@ export function registerIpcHandlers() {
     return result.filePaths[0]
   })
 
+  ipcMain.handle('select-output-directory', async () => {
+    const result = await dialog.showOpenDialog(getWin(), {
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
+    })
+    if (result.canceled) return null
+    return result.filePaths[0]
+  })
+
   ipcMain.handle('clone-project', async (_e, srcDir, copyOptions) => {
     try {
       const result = await cloneProject(srcDir, copyOptions)
