@@ -1,8 +1,37 @@
 import { create } from 'zustand'
+import {
+  WORKSPACE_SESSION_KEY,
+  PANE_RATIO_KEY,
+  DEFAULT_PANE_RATIO,
+  clampPaneRatio,
+  parseWorkspaceSession
+} from '../workspaceState'
 
 const STORAGE_KEY   = 'opentrans_settings'
 const PROFILES_KEY  = 'opentrans_profiles'
 const THEME_KEY     = 'opentrans_theme'
+
+function loadWorkspaceSession() {
+  try {
+    return parseWorkspaceSession(localStorage.getItem(WORKSPACE_SESSION_KEY))
+  } catch {
+    return null
+  }
+}
+
+function saveWorkspaceSession(session) {
+  if (!session?.srcDir || !session?.translatorDir) {
+    localStorage.removeItem(WORKSPACE_SESSION_KEY)
+    return
+  }
+  localStorage.setItem(WORKSPACE_SESSION_KEY, JSON.stringify(session))
+}
+
+function loadPaneRatio() {
+  const raw = localStorage.getItem(PANE_RATIO_KEY)
+  if (!raw) return DEFAULT_PANE_RATIO
+  return clampPaneRatio(Number(raw))
+}
 
 function loadSettings() {
   try {
@@ -27,13 +56,16 @@ function applyTheme(theme) {
   localStorage.setItem(THEME_KEY, theme)
 }
 
+const initialSession = loadWorkspaceSession()
+
 const useStore = create((set, get) => ({
-  srcDir: null,
-  translatorDir: null,
+  srcDir: initialSession?.srcDir || null,
+  translatorDir: initialSession?.translatorDir || null,
   fileTree: [],
   selectedFile: null,
   progressMap: {},
   errorMap: {},
+  paneRatio: loadPaneRatio(),
 
   settings: {
     baseUrl: 'https://api.openai.com/v1',
@@ -52,10 +84,32 @@ const useStore = create((set, get) => ({
   settingsOpen: false,
   theme: loadTheme(),
 
-  setSrcDir: (dir) => set({ srcDir: dir }),
-  setTranslatorDir: (dir) => set({ translatorDir: dir }),
+  setSrcDir: (dir) => set((state) => {
+    saveWorkspaceSession({ srcDir: dir, translatorDir: state.translatorDir })
+    return { srcDir: dir }
+  }),
+  setTranslatorDir: (dir) => set((state) => {
+    saveWorkspaceSession({ srcDir: state.srcDir, translatorDir: dir })
+    return { translatorDir: dir }
+  }),
   setFileTree: (tree) => set({ fileTree: tree }),
   setSelectedFile: (file) => set({ selectedFile: file }),
+  clearWorkspace: () => set(() => {
+    saveWorkspaceSession(null)
+    return {
+      srcDir: null,
+      translatorDir: null,
+      fileTree: [],
+      selectedFile: null,
+      progressMap: {},
+      errorMap: {}
+    }
+  }),
+  setPaneRatio: (ratio) => set(() => {
+    const nextRatio = clampPaneRatio(ratio)
+    localStorage.setItem(PANE_RATIO_KEY, String(nextRatio))
+    return { paneRatio: nextRatio }
+  }),
 
   updateProgress: (relPath, status, error = '') =>
     set((state) => ({
